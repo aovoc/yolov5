@@ -22,6 +22,13 @@ class Conv(nn.Module):
 
     def fuseforward(self, x):
         return self.act(self.conv(x))
+class ConvT(nn.Module):
+    def __init__(self,c1,c2,k,s,p,bias):
+        super(ConvT, self).__init__()
+        self.convT = nn.ConvTranspose2d(c1,c2,k,s,p,bias)
+        self.bn = nn.BatchNorm2d(c2)
+    def forward(self,x):
+        return  self.bn(self.convT(x))
 
 
 class Bottleneck(nn.Module):
@@ -43,17 +50,19 @@ class BottleneckCSP(nn.Module):
         super(BottleneckCSP, self).__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = nn.Conv2d(c1, c_, 1, 1, bias=False)
-        self.cv3 = nn.Conv2d(c_, c_, 1, 1, bias=False)
+        self.cv2 = Conv(c1, c_, 1, 1)
+        self.cv3 = Conv(c_, c_, 1, 1)
         self.cv4 = Conv(c2, c2, 1, 1)
-        self.bn = nn.BatchNorm2d(2 * c_)  # applied to cat(cv2, cv3)
-        self.act = nn.LeakyReLU(0.1, inplace=True)
+        # self.bn = nn.BatchNorm2d(2 * c_)  # applied to cat(cv2, cv3)
+        # self.act = nn.LeakyReLU(0.1, inplace=True)
         self.m = nn.Sequential(*[Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)])
 
     def forward(self, x):
         y1 = self.cv3(self.m(self.cv1(x)))
         y2 = self.cv2(x)
-        return self.cv4(self.act(self.bn(torch.cat((y1, y2), dim=1))))
+        # return self.cv4(self.act(self.bn(torch.cat((y1, y2), dim=1))))
+        return self.cv4(torch.cat((y1, y2), dim=1))
+		
 
 
 class SPP(nn.Module):
@@ -63,7 +72,7 @@ class SPP(nn.Module):
         c_ = c1 // 2  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c_ * (len(k) + 1), c2, 1, 1)
-        self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in k])
+        self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2, ceil_mode=True) for x in k])
 
     def forward(self, x):
         x = self.cv1(x)
@@ -80,11 +89,12 @@ class Focus(nn.Module):
     # Focus wh information into c-space
     def __init__(self, c1, c2, k=1):
         super(Focus, self).__init__()
-        self.conv = Conv(c1 * 4, c2, k, 1)
+        # self.conv = Conv(c1 * 4, c2, k, 1)
+        self.conv = Conv(c1, c2, k, 1)
 
     def forward(self, x):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
-        return self.conv(torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1))
-
+        # return self.conv(torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1))
+        return self.conv(x)
 
 class Concat(nn.Module):
     # Concatenate a list of tensors along dimension
